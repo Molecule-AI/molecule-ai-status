@@ -1,0 +1,24 @@
+name: Response Time CI
+on:
+  repository_dispatch:
+    types: [response-time]
+  schedule:
+    # Hourly is enough for response-time histograms — the uptime
+    # workflow already captures short-term latency in each check.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Update response time graphs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: upptime/uptime-monitor@master
+        with:
+          command: "response-time"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
+  issues: write

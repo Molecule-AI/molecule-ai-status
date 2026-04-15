@@ -1,0 +1,23 @@
+name: Graphs CI
+on:
+  repository_dispatch:
+    types: [graphs]
+  schedule:
+    # Daily at 00:00 UTC is enough for the long-term uptime graphs.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Generate graphs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: upptime/uptime-monitor@master
+        with:
+          command: "graphs"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
+  issues: write

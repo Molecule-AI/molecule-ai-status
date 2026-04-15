@@ -1,0 +1,32 @@
+name: Static Site CI
+on:
+  repository_dispatch:
+    types: [static-site]
+  schedule:
+    # Every hour — rebuilds the status page HTML from the latest
+    # check history. More frequent than necessary but cheap.
+    - cron: "0 * * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".upptimerc.yml"
+      - "README.md"
+      - "history/**"
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build and deploy status site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: upptime/uptime-monitor@master
+        with:
+          command: "site"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write

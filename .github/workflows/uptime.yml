@@ -1,0 +1,32 @@
+name: Uptime CI
+on:
+  repository_dispatch:
+    types: [uptime]
+  schedule:
+    # Every 5 minutes. GitHub Actions caps schedule resolution at ~5min
+    # in practice; requesting */1 or */3 just gets coalesced.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    # Re-run whenever the sites list changes so new endpoints get an
+    # immediate first check instead of waiting up to 5 minutes.
+    branches:
+      - main
+    paths:
+      - ".upptimerc.yml"
+
+jobs:
+  release:
+    name: Check status of endpoints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: upptime/uptime-monitor@master
+        with:
+          command: "update"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write

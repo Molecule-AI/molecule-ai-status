@@ -1,0 +1,78 @@
+# Molecule AI status page
+# Powered by Upptime (https://upptime.js.org)
+#
+# This file is the single source of truth for what gets monitored.
+# Add new endpoints under `sites:` and the next workflow run picks
+# them up. Workflows live in .github/workflows/.
+
+owner: Molecule-AI
+repo: molecule-ai-status
+
+# URLs to monitor. `name` is the display label on the status page;
+# `url` is hit on every uptime check (every 5 minutes by default).
+# `expectedStatusCodes` defaults to [200, 201, 202, 203, 204, 205, 206,
+# 207, 208, 226]; override per-site when a route legitimately returns
+# a non-2xx on health.
+sites:
+  - name: Control plane API
+    url: https://molecule-cp.fly.dev/health
+    # /health returns {"service":"molecule-cp","status":"ok"}
+
+  - name: Control plane — Legal pages
+    url: https://molecule-cp.fly.dev/legal/terms
+    # HTML page; tests markdown-renderer path + static embed still works
+
+  - name: Canvas — apex (marketing + pricing)
+    url: https://moleculesai.app/
+    # Canvas apex lands on the marketing / landing route
+
+  - name: Canvas — pricing route
+    url: https://moleculesai.app/pricing
+    # Tests that the pricing page ships with the canvas deploy
+
+  - name: Canvas — legal redirect
+    url: https://moleculesai.app/legal/terms
+    # Verifies the canvas-side redirect (or direct serve) of legal pages
+
+status-website:
+  # Branding for the GitHub Pages status site. Dark-theme colors match
+  # the canvas aesthetic so the visual transition from status →
+  # product is seamless.
+  cname: status.moleculesai.app
+  name: Molecule AI Status
+  logoUrl: https://moleculesai.app/icon.png
+  introTitle: "Molecule AI status"
+  introMessage: >
+    Real-time uptime for the Molecule AI control plane, canvas, and
+    legal pages. Incidents automatically open as GitHub Issues in this
+    repo; subscribe to the repo to get email alerts when services
+    degrade.
+  navbar:
+    - title: Status
+      href: /
+    - title: GitHub
+      href: https://github.com/Molecule-AI/molecule-ai-status
+
+# Assignees for incident Issues auto-created by the uptime workflow.
+# Upptime opens an Issue the moment a check fails; add GitHub logins
+# here so it auto-assigns + emails them.
+assignees:
+  - HongmingWang-Rabbit
+
+# How long before a failing check is declared an incident.
+# Default is 2 consecutive failures; we use 3 to absorb transient
+# blips (Fly cold-start on scale-to-zero, DNS flap).
+i18n:
+  activeIncidents: Active incidents
+  allSystemsOperational: All systems operational
+  incidentReport: Incident report
+  incidents: Incidents
+  live: Live
+  pastIncidents: Past incidents
+  responseTime: Response time
+  status: Status
+  title: Status
+  upBadge: Up
+  downBadge: Down
+  degradedBadge: Degraded
+  uptime: Uptime
