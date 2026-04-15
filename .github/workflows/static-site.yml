@@ -1,11 +1,10 @@
 name: Static Site CI
 on:
-  repository_dispatch:
-    types: [static-site]
   schedule:
-    # Every hour — rebuilds the status page HTML from the latest
-    # check history. More frequent than necessary but cheap.
-    - cron: "0 * * * *"
+    - cron: "0 1 * * *"
+  repository_dispatch:
+    types: [static_site]
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -13,23 +12,32 @@ on:
       - ".upptimerc.yml"
       - "README.md"
       - "history/**"
-  workflow_dispatch:
 
 jobs:
   release:
     name: Build and deploy status site
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - uses: upptime/uptime-monitor@master
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GH_PAT || github.token }}
+      - name: Generate site
+        uses: upptime/uptime-monitor@v1.41.0
         with:
           command: "site"
         env:
-          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT || github.token }}
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GH_PAT || github.token }}
+          publish_dir: "site/status-page/__sapper__/export/"
+          force_orphan: "false"
+          user_name: "Upptime Bot"
+          user_email: "73812536+upptime-bot@users.noreply.github.com"
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
