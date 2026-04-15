@@ -12,6 +12,9 @@ jobs:
     name: Generate README + summary
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: upptime/uptime-monitor@master
         with:
           command: "readme"

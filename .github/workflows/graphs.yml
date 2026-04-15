@@ -12,6 +12,9 @@ jobs:
     name: Generate graphs
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: upptime/uptime-monitor@master
         with:
           command: "graphs"
