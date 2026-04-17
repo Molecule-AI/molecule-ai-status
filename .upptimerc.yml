@@ -14,6 +14,14 @@ repo: molecule-ai-status
 # 207, 208, 226]; override per-site when a route legitimately returns
 # a non-2xx on health.
 sites:
+  - name: Customer app
+    url: https://app.moleculesai.app
+    # Main customer-facing canvas application
+
+  - name: Docs site
+    url: https://doc.moleculesai.app
+    # Developer documentation at doc.moleculesai.app (Fumadocs/Next.js, deployed via Vercel)
+
   - name: Control plane API
     url: https://molecule-cp.fly.dev/health
     # /health returns {"service":"molecule-cp","status":"ok"}
@@ -22,17 +30,19 @@ sites:
     url: https://molecule-cp.fly.dev/legal/terms
     # HTML page; tests markdown-renderer path + static embed still works
 
-  - name: Canvas — apex (marketing + pricing)
-    url: https://moleculesai.app/
-    # Canvas apex lands on the marketing / landing route
+  - name: Landing page
+    url: https://www.moleculesai.app/
+    # Main marketing / landing page. Use www target directly to skip apex 307 redirect.
 
   - name: Canvas — pricing route
-    url: https://moleculesai.app/pricing
-    # Tests that the pricing page ships with the canvas deploy
+    url: https://www.moleculesai.app/pricing
+    # Tests that the pricing page ships with the canvas deploy.
+    # Use www target to avoid apex 307 redirect false-positives (fixes #6).
 
   - name: Canvas — legal redirect
-    url: https://moleculesai.app/legal/terms
-    # Verifies the canvas-side redirect (or direct serve) of legal pages
+    url: https://www.moleculesai.app/legal/terms
+    # Verifies the canvas-side serve of legal pages.
+    # Use www target to avoid apex 307 redirect false-positives (fixes #6).
 
 status-website:
   # Branding for the GitHub Pages status site. Dark-theme colors match
