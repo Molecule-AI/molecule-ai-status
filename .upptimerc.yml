@@ -23,12 +23,16 @@ sites:
     # Developer documentation at doc.moleculesai.app (Fumadocs/Next.js, deployed via Vercel)
 
   - name: Control plane API
-    url: https://molecule-cp.fly.dev/health
-    # /health returns {"service":"molecule-cp","status":"ok"}
+    url: https://api.moleculesai.app/health
+    # /health returns {"service":"molecule-cp","status":"ok"}.
+    # Repointed from molecule-cp.fly.dev → api.moleculesai.app (Railway)
+    # after the Apr 2026 infra migration; the old fly.dev host is
+    # retired and was showing the CP as "down" on every check.
 
   - name: Control plane — Legal pages
-    url: https://molecule-cp.fly.dev/legal/terms
-    # HTML page; tests markdown-renderer path + static embed still works
+    url: https://api.moleculesai.app/legal/terms
+    # HTML page; tests markdown-renderer path + static embed still works.
+    # Repointed off fly.dev (see note above).
 
   - name: Landing page
     url: https://www.moleculesai.app/
