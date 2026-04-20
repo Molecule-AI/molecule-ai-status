@@ -38,15 +38,17 @@ sites:
     url: https://www.moleculesai.app/
     # Main marketing / landing page. Use www target directly to skip apex 307 redirect.
 
-  - name: Canvas — pricing route
-    url: https://www.moleculesai.app/pricing
-    # Tests that the pricing page ships with the canvas deploy.
-    # Use www target to avoid apex 307 redirect false-positives (fixes #6).
-
-  - name: Canvas — legal redirect
-    url: https://www.moleculesai.app/legal/terms
-    # Verifies the canvas-side serve of legal pages.
-    # Use www target to avoid apex 307 redirect false-positives (fixes #6).
+  # "Canvas — pricing route" and "Canvas — legal redirect" removed
+  # 2026-04-19 because the paths they probed never existed:
+  #   - www.moleculesai.app/pricing → 404 (marketing site has no
+  #     pricing page yet; molecule-controlplane#92 tracks building
+  #     one on app.moleculesai.app alongside the credit UI)
+  #   - www.moleculesai.app/legal/terms → 404. Legal pages live on
+  #     api.moleculesai.app/legal/* and are already monitored as
+  #     "Control plane — Legal pages" above — that probe is the
+  #     canonical one.
+  # Re-add targeted canvas-side probes once /pricing ships on the
+  # product app.
 
 status-website:
   # Branding for the GitHub Pages status site. Dark-theme colors match
