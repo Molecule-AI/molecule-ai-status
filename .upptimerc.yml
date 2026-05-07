@@ -65,7 +65,7 @@ status-website:
     - title: Status
       href: /
     - title: GitHub
-      href: https://github.com/Molecule-AI/molecule-ai-status
+      href: https://git.moleculesai.app/molecule-ai/molecule-ai-status
 
 # Assignees for incident Issues auto-created by the uptime workflow.
 # Upptime opens an Issue the moment a check fails; add GitHub logins
