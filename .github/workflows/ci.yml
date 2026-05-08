@@ -1,0 +1,36 @@
+name: CI
+
+# Tiny no-op workflow so the dashboard doesn't display a stale red
+# badge from the disabled upptime workflows. The workflows that actually
+# probed our endpoints (uptime/response-time/graphs/summary/static-site)
+# were moved to .github/workflows-disabled-post-suspension/ in #5
+# because upptime cannot run on Gitea Actions post-2026-05-06 GitHub
+# org suspension. Replacement is tracked in internal#97.
+#
+# This noop fires on every push to main + once daily so the badge
+# accurately reflects "this repo is intentionally idle" instead of
+# "the last 5x/hour upptime cron failed forever ago."
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Daily at 00:00 UTC so the badge stays green even on weeks with no
+    # commits. Cheap; just an echo.
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo intentionally idle
+        run: |
+          echo "molecule-ai-status is intentionally idle until the upptime"
+          echo "replacement lands per internal#97. The five upptime workflows"
+          echo "that used to live in .github/workflows/ have been moved to"
+          echo ".github/workflows-disabled-post-suspension/ — see that"
+          echo "directory's README.md for context."
