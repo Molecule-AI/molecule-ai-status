@@ -1,6 +1,12 @@
 {
   "version": 2,
   "name": "molecule-ai-status",
+  "rewrites": [
+    {
+      "source": "/data/(.*)",
+      "destination": "https://git.moleculesai.app/molecule-ai/molecule-ai-status/raw/branch/main/$1"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -13,6 +19,12 @@
     },
     {
       "source": "/(index.html|app.js)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=60" }
+      ]
+    },
+    {
+      "source": "/data/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=60" }
       ]

@@ -9,12 +9,14 @@
 // well is "load fast, show correct status, never lie." React/Vue
 // would be cargo-culting at this scale.
 //
-// Data source: public Gitea raw URLs. No auth. Repo is public.
+// Data source: same-origin /data/* paths, Vercel-rewritten to
+// git.moleculesai.app raw URLs. The rewrite avoids cross-origin
+// browser fetches (Gitea doesn't send Access-Control-Allow-Origin
+// on raw file responses). vercel.json owns the rewrite map.
 
-const REPO_BASE =
-  "https://git.moleculesai.app/molecule-ai/molecule-ai-status/raw/branch/main";
-const HISTORY_URL = (slug) => `${REPO_BASE}/history/${slug}.jsonl`;
-const CONFIG_URL = `${REPO_BASE}/.upptimerc.yml`;
+const HISTORY_URL = (slug) => `/data/history/${slug}.jsonl`;
+const CONFIG_URL = `/data/.upptimerc.yml`;
+const REPO_BROWSE = "https://git.moleculesai.app/molecule-ai/molecule-ai-status";
 
 // Window of history we render in the sparkline (24h of probes at one
 // per 5 minutes ≈ 288). Cap to keep the DOM bounded if a site has
@@ -107,19 +109,15 @@ async function fetchText(url) {
 // Render a row for one site given its latest results.
 function renderRow(site, results) {
   const last = results[results.length - 1];
-  const status = !last
-    ? "unknown"
-    : last.success
-      ? "up"
-      : "down";
-
+  const status = !last ? "unknown" : last.success ? "up" : "down";
   const latency = last && last.success ? `${last.latency_ms} ms` : "—";
 
   // Sparkline: last SPARKLINE_LIMIT entries, one bar per. Bar height
   // proportional to latency (clamped). Failing checks render red and
   // taller (so eye is drawn to outages).
   const recent = results.slice(-SPARKLINE_LIMIT);
-  const maxLat = Math.max(50, ...recent.filter((r) => r.success).map((r) => r.latency_ms));
+  const succ = recent.filter((r) => r.success);
+  const maxLat = Math.max(50, ...succ.map((r) => r.latency_ms));
 
   const spark = recent
     .map((r) => {
@@ -190,7 +188,7 @@ async function load() {
   const yaml = await fetchText(CONFIG_URL);
   if (!yaml) {
     document.getElementById("grid").innerHTML =
-      `<div class="empty">Failed to load probe-list config from Gitea. Check that <code>${CONFIG_URL}</code> is reachable.</div>`;
+      `<div class="empty">Failed to load probe-list config. Check that <code>${CONFIG_URL}</code> is reachable (Vercel rewrites <code>/data/*</code> to ${REPO_BROWSE}/raw/branch/main/<em>$1</em>).</div>`;
     document.getElementById("updated").textContent = "load failed";
     return;
   }
@@ -212,7 +210,7 @@ async function load() {
   );
 
   // 3. Render rows + summary.
-  const rowSummaries = enriched.map(({ site, results }) => {
+  const rowSummaries = enriched.map(({ results }) => {
     const last = results[results.length - 1];
     return {
       status: !last ? "unknown" : last.success ? "up" : "down",
@@ -233,9 +231,10 @@ async function load() {
     const latest = allTimestamps.sort().pop();
     const ago = Math.round((Date.now() - new Date(latest).getTime()) / 60000);
     document.getElementById("updated").innerHTML =
-      `last probe ${ago} min ago · <a href="${REPO_BASE}/history">history</a>`;
+      `last probe ${ago} min ago · <a href="${REPO_BROWSE}/src/branch/main/history">history</a>`;
   } else {
-    document.getElementById("updated").textContent = "no probe data yet";
+    document.getElementById("updated").innerHTML =
+      `no probe data yet · <a href="${REPO_BROWSE}">source</a>`;
   }
 }
 
