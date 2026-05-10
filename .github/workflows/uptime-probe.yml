@@ -85,6 +85,17 @@ jobs:
           echo "== run summary =="
           jq -r '.[] | "\(.name): \(.status_code) \(.latency_ms)ms success=\(.success)"' /tmp/run.json || cat /tmp/run.json
 
+      - name: Aggregate probe results → Upptime format
+        # Reads history/<slug>.jsonl files, computes rolling uptime/response-time
+        # aggregates, and writes history/<slug>.yml + history/summary.json.
+        # This fills the gap left by the Upptime → custom-probe migration:
+        # the probe binary handles JSONL appends; this step handles the
+        # aggregator outputs that the status page UI reads.
+        # See molecule-ai/molecule-ai-status#7.
+        run: |
+          set -euo pipefail
+          python3 scripts/aggregate.py --history-dir history
+
       - name: Commit history changes
         # Fails fast if Gitea is unhealthy rather than silently swallowing
         # the push. The next /5 cron firing picks up where this left off once
