@@ -98,7 +98,7 @@ jobs:
           # The probe ran successfully; we just can't persist the results yet.
           GATEWAY="https://git.moleculesai.app"
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 "$GATEWAY/api/v1/version")
+            --max-time 10 "$GATEWAY/api/v1/version" || echo 000)
           if [ "$HTTP_CODE" != "200" ]; then
             echo "::error::Gitea unhealthy (HTTP $HTTP_CODE) — cannot push results."
             echo "::error::Probe data is in history/. Next successful push after Gitea"
