@@ -85,11 +85,27 @@ jobs:
           echo "== run summary =="
           jq -r '.[] | "\(.name): \(.status_code) \(.latency_ms)ms success=\(.success)"' /tmp/run.json || cat /tmp/run.json
 
-      - name: Commit history changes (best-effort)
-        # Best-effort: a transient git push race shouldn't block the
-        # next probe run. The next /5 firing will commit again.
+      - name: Commit history changes
+        # Fails fast if Gitea is unhealthy rather than silently swallowing
+        # the push. The next /5 cron firing picks up where this left off once
+        # Gitea recovers. Also guarded against concurrent-run race: the
+        # workflow-level concurrency group (line ~42) ensures at most one
+        # probe run per branch is in-flight at any time.
         run: |
-          set +e
+          set -euo pipefail
+
+          # Health gate: fail fast if Gitea is 502 or otherwise unreachable.
+          # The probe ran successfully; we just can't persist the results yet.
+          GATEWAY="https://git.moleculesai.app"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 "$GATEWAY/api/v1/version")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Gitea unhealthy (HTTP $HTTP_CODE) — cannot push results."
+            echo "::error::Probe data is in history/. Next successful push after Gitea"
+            echo "::error::recovers will commit all buffered results."
+            exit 1
+          fi
+
           git config user.name "uptime-probe[bot]"
           git config user.email "uptime-probe@bots.moleculesai.app"
           git add history/
@@ -98,4 +114,4 @@ jobs:
             exit 0
           fi
           git commit -m "chore(uptime): probe results $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push origin HEAD:main || echo "push failed; next run will retry"
+          git push origin HEAD:main
