@@ -1,0 +1,101 @@
+name: Uptime probe (Gitea-native — replaces upptime)
+#
+# Runs the molecule-ai-uptime-probe binary on a 5-minute cadence,
+# appends per-site JSONL results to history/, and commits the changes
+# back to main. Replaces the five upptime workflows that lived in this
+# repo before they were moved to .github/workflows-disabled/ (because
+# every upptime call to api.github.com 401s post-2026-05-06 GitHub
+# org suspension).
+#
+# See molecule-ai/molecule-ai-status#2 for the design rationale +
+# molecule-ai/molecule-ai-uptime-probe for the probe binary itself.
+#
+# Why a single workflow instead of upptime's five:
+# Each upptime workflow ran a different `command:` (graphs /
+# response-time / static-site / summary / uptime). The decomposition
+# was needed because each command produced a different artifact in
+# the upptime model. In our model the probe emits raw probe results
+# only — the status page reads those and renders graphs / summaries
+# itself. One concern per tool. One workflow.
+
+on:
+  schedule:
+    # Every 5 minutes — matches the upptime default cadence.
+    - cron: "*/5 * * * *"
+  # Manual trigger for ad-hoc checks.
+  workflow_dispatch:
+  # Re-run when probe-list config changes so a new endpoint gets a
+  # baseline immediately, not at the next /5 mark.
+  push:
+    branches: [main]
+    paths: [".upptimerc.yml"]
+
+permissions:
+  contents: write   # required to commit history/ updates
+
+jobs:
+  probe:
+    name: Probe + commit
+    runs-on: ubuntu-latest
+    # Concurrency: at most one probe run at a time per branch. Two
+    # cron firings overlapping would race on history/ commits.
+    concurrency:
+      group: uptime-probe-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          token: ${{ secrets.GITEA_TOKEN }}   # see molecule-ai/internal#75
+
+      - name: Install probe
+        # Build directly from the probe's repo at a pinned commit. Pin
+        # is updated explicitly in this workflow file when the probe
+        # itself ships a new behaviour-changing version. Avoids
+        # supply-chain ambiguity.
+        run: |
+          set -euo pipefail
+          GOPROBE_REPO=https://git.moleculesai.app/molecule-ai/molecule-ai-uptime-probe.git
+          GOPROBE_REF=main
+          tmp=$(mktemp -d)
+          git clone --depth 1 --branch "$GOPROBE_REF" "$GOPROBE_REPO" "$tmp/probe"
+          (cd "$tmp/probe" && go build -o /usr/local/bin/uptime-probe ./cmd/probe)
+          /usr/local/bin/uptime-probe -h 2>&1 | head -5
+
+      - name: Run probes
+        # Exit 1 from the probe when any site fails — but we don't
+        # want a single failing site to abort the workflow before the
+        # commit step. `|| true` swallows the non-zero exit; the
+        # failure shows up as success=false in the JSONL history,
+        # where the status page picks it up.
+        run: |
+          mkdir -p history
+          /usr/local/bin/uptime-probe \
+            -config .upptimerc.yml \
+            -history-dir history \
+            -timeout 30s \
+            > /tmp/run.json || true
+          echo "== run summary =="
+          jq -r '.[] | "\(.name): \(.status_code) \(.latency_ms)ms success=\(.success)"' /tmp/run.json || cat /tmp/run.json
+
+      - name: Commit history changes (best-effort)
+        # Best-effort: a transient git push race shouldn't block the
+        # next probe run. The next /5 firing will commit again.
+        run: |
+          set +e
+          git config user.name "uptime-probe[bot]"
+          git config user.email "uptime-probe@bots.moleculesai.app"
+          git add history/
+          if git diff --cached --quiet; then
+            echo "no history changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(uptime): probe results $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push origin HEAD:main || echo "push failed; next run will retry"
