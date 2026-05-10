@@ -45,3 +45,4 @@
 {"timestamp":"2026-05-10T21:06:26Z","name":"Canvas — legal redirect","url":"https://www.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":475,"success":true}
 {"timestamp":"2026-05-10T21:10:45Z","name":"Canvas — legal redirect","url":"https://www.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":251,"success":true}
 {"timestamp":"2026-05-10T21:40:43Z","name":"Canvas — legal redirect","url":"https://www.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":324,"success":true}
+{"timestamp":"2026-05-10T22:01:30Z","name":"Canvas — legal redirect","url":"https://www.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":190,"success":true}
