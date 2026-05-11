@@ -62,3 +62,4 @@
 {"timestamp":"2026-05-11T00:55:54Z","name":"Control plane — Legal pages","url":"https://api.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":150,"success":true}
 {"timestamp":"2026-05-11T01:00:53Z","name":"Control plane — Legal pages","url":"https://api.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":149,"success":true}
 {"timestamp":"2026-05-11T01:10:53Z","name":"Control plane — Legal pages","url":"https://api.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":230,"success":true}
+{"timestamp":"2026-05-11T01:45:53Z","name":"Control plane — Legal pages","url":"https://api.moleculesai.app/legal/terms","method":"GET","status_code":200,"latency_ms":168,"success":true}
