@@ -16,7 +16,12 @@
 
 const HISTORY_URL = (slug) => `/data/history/${slug}.jsonl`;
 const CONFIG_URL = `/data/.upptimerc.yml`;
+const HEARTBEAT_URL = `/data/history/.monitoring-heartbeat.jsonl`;
 const REPO_BROWSE = "https://git.moleculesai.app/molecule-ai/molecule-ai-status";
+
+// Grace period before declaring monitoring degraded (seconds).
+// 5-minute probe cadence + queue delay + clock skew.
+const STALE_THRESHOLD_S = 900;
 
 // Window of history we render in the sparkline (24h of probes at one
 // per 5 minutes ≈ 288). Cap to keep the DOM bounded if a site has
@@ -106,6 +111,25 @@ async function fetchText(url) {
   }
 }
 
+// Check monitoring heartbeat — return null if fresh, or an error string if stale.
+async function checkMonitoringHealth() {
+  const text = await fetchText(HEARTBEAT_URL);
+  if (!text) return "no heartbeat data";
+  const lines = text.trim().split("\n").filter(Boolean);
+  if (!lines.length) return "heartbeat file empty";
+  try {
+    const last = JSON.parse(lines[lines.length - 1]);
+    const lastTs = new Date(last.timestamp).getTime();
+    const ageS = (Date.now() - lastTs) / 1000;
+    if (ageS > STALE_THRESHOLD_S) {
+      return `Monitoring stale: last probe ${Math.round(ageS / 60)} min ago (threshold: ${STALE_THRESHOLD_S / 60} min)`;
+    }
+    return null; // healthy
+  } catch {
+    return "heartbeat parse error";
+  }
+}
+
 // Render a row for one site given its latest results.
 function renderRow(site, results) {
   const last = results[results.length - 1];
@@ -146,14 +170,18 @@ function escape(s) {
   })[c]);
 }
 
-function renderSummary(rows) {
+function renderSummary(rows, monitoringError) {
   const total = rows.length;
   const up = rows.filter((r) => r.status === "up").length;
   const down = rows.filter((r) => r.status === "down").length;
   const unknown = rows.filter((r) => r.status === "unknown").length;
 
   let dot, text, sub;
-  if (total === 0) {
+  if (monitoringError) {
+    dot = "var(--amber)";
+    text = "Monitoring degraded";
+    sub = monitoringError + " — service status may be outdated.";
+  } else if (total === 0) {
     dot = "var(--ink-soft)";
     text = "No services configured";
     sub = "Add `.upptimerc.yml` entries.";
@@ -184,8 +212,11 @@ function renderSummary(rows) {
 }
 
 async function load() {
-  // 1. Fetch + parse the probe-list config.
-  const yaml = await fetchText(CONFIG_URL);
+  // 1. Fetch + parse the probe-list config + check monitoring heartbeat.
+  const [yaml, monitoringError] = await Promise.all([
+    fetchText(CONFIG_URL),
+    checkMonitoringHealth(),
+  ]);
   if (!yaml) {
     document.getElementById("grid").innerHTML =
       `<div class="empty">Failed to load probe-list config. Check that <code>${CONFIG_URL}</code> is reachable (Vercel rewrites <code>/data/*</code> to ${REPO_BROWSE}/raw/branch/main/<em>$1</em>).</div>`;
@@ -209,7 +240,7 @@ async function load() {
     })
   );
 
-  // 3. Render rows + summary.
+  // 3. Render rows + summary (pass monitoring health).
   const rowSummaries = enriched.map(({ results }) => {
     const last = results[results.length - 1];
     return {
@@ -217,7 +248,7 @@ async function load() {
     };
   });
 
-  document.getElementById("summary").innerHTML = renderSummary(rowSummaries);
+  document.getElementById("summary").innerHTML = renderSummary(rowSummaries, monitoringError);
   document.getElementById("grid").innerHTML = enriched
     .map(({ site, results }) => renderRow(site, results))
     .join("");
