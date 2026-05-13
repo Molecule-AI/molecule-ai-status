@@ -82,22 +82,31 @@ jobs:
             fi
           fi
 
-      - name: Write heartbeat
+      - name: Write + trim heartbeat
         # Always write a fresh heartbeat so the next run has a baseline.
         # Include the workflow-run URL so operators can click through from an alert.
+        # Keep only the last 10 entries to prevent unbounded file growth
+        # (~10 entries × ~100 bytes × 288 runs/day × 365 days ≈ 1 MB/year — fine
+        # without trim, but trimming keeps diffs cheap and git history clean).
         run: |
           set -euo pipefail
           mkdir -p history
+          HB="history/.monitoring-heartbeat.jsonl"
           python3 -c "
 import json, datetime
 ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
-# Derive the run URL from GITHUB_* env vars available in Actions.
 run_url = 'https://git.moleculesai.app/' + (
     '${GITHUB_REPOSITORY}' if '${GITHUB_REPOSITORY}' else 'molecule-ai/molecule-ai-status'
 ) + '/actions/runs/' + str('${GITHUB_RUN_ID:-0}')
 entry = {'timestamp': ts, 'run_url': run_url}
-with open('history/.monitoring-heartbeat.jsonl', 'a') as f:
+with open('$HB', 'a') as f:
     f.write(json.dumps(entry) + '\n')
+# Trim to last 10 entries (the file grows 1 line per run).
+with open('$HB') as f:
+    lines = [l for l in f if l.strip()]
+keep = lines[-10:]
+with open('$HB', 'w') as f:
+    f.write(''.join(keep))
 "
 
       - name: Setup Go
