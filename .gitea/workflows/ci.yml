@@ -7,11 +7,11 @@ name: CI
 # because upptime cannot run on Gitea Actions post-2026-05-06 GitHub
 # org suspension. Replacement is tracked in internal#97.
 #
-# This noop fires on every push to main + once daily so the badge
-# accurately reflects "this repo is intentionally idle" instead of
-# "the last 5x/hour upptime cron failed forever ago."
+# Fires on pull_request + push to main + daily schedule so the badge
+# stays green and PRs are validated for YAML syntax.
 
 on:
+  pull_request:
   push:
     branches: [main]
   schedule:
