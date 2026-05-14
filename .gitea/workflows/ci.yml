@@ -12,6 +12,7 @@ name: CI
 # "the last 5x/hour upptime cron failed forever ago."
 
 on:
+  pull_request:
   push:
     branches: [main]
   schedule:
