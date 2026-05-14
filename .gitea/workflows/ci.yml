@@ -18,8 +18,7 @@ on:
   schedule:
     # Daily at 00:00 UTC so the badge stays green even on weeks with no
     # commits. Cheap; just an echo.
-    - cron:
-  pull_request: "0 0 * * *"
+    - cron: "0 0 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -27,8 +26,7 @@ permissions:
 
 jobs:
   noop:
-    runs-on:
-  pull_request: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Repo intentionally idle
         run: |
