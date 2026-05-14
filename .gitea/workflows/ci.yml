@@ -12,12 +12,14 @@ name: CI
 # "the last 5x/hour upptime cron failed forever ago."
 
 on:
+  pull_request:
   push:
     branches: [main]
   schedule:
     # Daily at 00:00 UTC so the badge stays green even on weeks with no
     # commits. Cheap; just an echo.
-    - cron: "0 0 * * *"
+    - cron:
+  pull_request: "0 0 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -25,7 +27,8 @@ permissions:
 
 jobs:
   noop:
-    runs-on: ubuntu-latest
+    runs-on:
+  pull_request: ubuntu-latest
     steps:
       - name: Repo intentionally idle
         run: |
