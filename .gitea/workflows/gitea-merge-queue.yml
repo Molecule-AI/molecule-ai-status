@@ -51,8 +51,12 @@ jobs:
           QUEUE_LABEL: merge-queue
           HOLD_LABEL: merge-queue-hold
           UPDATE_STYLE: merge
-          # molecule-ai-status has a noop CI; required context is CI/noop.
-          # sop-checklist will be added by PR #14 and wired in a follow-up.
+          # molecule-ai-status has two CI job types across queued PRs:
+          #   PR #14, #16: CI / noop (from ci.yml on main)
+          #   PR #17: CI / Workflow YAML lint (from validate-workflows.yml)
+          #              + CI / noop (noop job added to validate-workflows.yml)
+          # All three PRs now have CI / noop, so this context satisfies all.
+          # sop-checklist added by PR #14 will be wired in a follow-up.
           REQUIRED_CONTEXTS: CI / noop (pull_request)
           PUSH_REQUIRED_CONTEXTS: CI / noop (push)
         run: python3 .gitea/scripts/gitea-merge-queue.py
