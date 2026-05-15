@@ -1,0 +1,53 @@
+# Lint workflow for molecule-ai-status.
+# Validates YAML syntax of all workflow files in .gitea/workflows/ and .github/workflows/.
+# This runs on pull_request to ensure new workflows are syntactically valid
+# before the merge queue processes them.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  noop:
+    # Dummy job so the queue's REQUIRED_CONTEXTS=CI / noop (pull_request)
+    # matches this PR. The yaml-lint job below provides real validation.
+    name: noop
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op pass
+        run: 'true'
+
+  yaml-lint:
+    name: Workflow YAML lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all workflow YAMLs parse correctly
+        run: |
+          python3 - << 'PYEOF'
+          import sys, os
+          from pathlib import Path
+          import yaml
+
+          errors = 0
+          for subdir in ('.gitea/workflows', '.github/workflows'):
+              for path in Path(subdir).glob('*.yml'):
+                  try:
+                      with open(path, 'rb') as f:
+                          yaml.safe_load(f)
+                      print(f"  OK  {path}")
+                  except yaml.YAMLError as e:
+                      print(f"  FAIL {path}: {e}")
+                      errors += 1
+          if errors > 0:
+              print(f"::error::{errors} workflow file(s) have invalid YAML")
+              sys.exit(1)
+          print("All workflow YAMLs are syntactically valid.")
+          PYEOF
