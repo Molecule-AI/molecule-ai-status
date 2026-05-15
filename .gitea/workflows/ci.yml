@@ -13,6 +13,7 @@ name: CI
 # .github/workflows-disabled-post-suspension/ per internal#97.
 
 on:
+  pull_request:
   push:
     branches: [main]
   pull_request:
