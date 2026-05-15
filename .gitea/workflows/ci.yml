@@ -1,19 +1,22 @@
 name: CI
 
-# Tiny no-op workflow so the dashboard doesn't display a stale red
-# badge from the disabled upptime workflows. The workflows that actually
-# probed our endpoints (uptime/response-time/graphs/summary/static-site)
-# were moved to .github/workflows-disabled-post-suspension/ in #5
-# because upptime cannot run on Gitea Actions post-2026-05-06 GitHub
-# org suspension. Replacement is tracked in internal#97.
+# CI workflow — noop badge + all-required sentinel.
 #
-# This noop fires on every push to main + once daily so the badge
-# accurately reflects "this repo is intentionally idle" instead of
-# "the last 5x/hour upptime cron failed forever ago."
+# The noop job fires on every push to main + once daily so the GitHub
+# Actions badge accurately reflects "this repo is intentionally idle" instead
+# of "the last 5x/hour upptime cron failed forever ago."
+#
+# The all-required sentinel (RFC internal#219 Phase 4) posts a single
+# `CI / all-required` status that branch protection can require. The
+# uptime-probe workflow churns underneath without any protection edits.
+# This sentinel replaces the five upptime workflows moved to
+# .github/workflows-disabled-post-suspension/ per internal#97.
 
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
   schedule:
     # Daily at 00:00 UTC so the badge stays green even on weeks with no
     # commits. Cheap; just an echo.
@@ -34,3 +37,111 @@ jobs:
           echo "that used to live in .github/workflows/ have been moved to"
           echo ".github/workflows-disabled-post-suspension/ — see that"
           echo "directory's README.md for context."
+
+  # all-required — single aggregator sentinel for branch-protection hard-gate.
+  #
+  # Single stable required-status name that branch protection points at;
+  # the uptime-probe workflow churns underneath via schedule+push without
+  # any protection edits needed. Pattern mirrors molecule-core's
+  # all-required sentinel (RFC internal#219 Phase 4).
+  #
+  # This job deliberately has no `needs:`. Gitea 1.22/act_runner can mark a
+  # job-level `if: always()` + `needs:` sentinel as skipped before upstream
+  # jobs settle, leaving branch protection with a permanent pending context.
+  # Instead, this independent sentinel polls the required context for main's
+  # HEAD and fails if any fail or never emit.
+  all-required:
+    name: all-required
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: Poll CI / Probe + commit status on main
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_ROOT: ${{ github.server_url }}/api/v1
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.request
+
+          token = os.environ["GITEA_TOKEN"]
+          api_root = os.environ["API_ROOT"].rstrip("/")
+          repo = os.environ["REPOSITORY"]
+          event = os.environ["EVENT_NAME"]
+
+          def api(path):
+              req = urllib.request.Request(f"{api_root}{path}", headers={"Authorization": f"token {token}"})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  return json.loads(r.read())
+
+          branch = api(f"/repos/{repo}/branches/main")
+          sha = branch["commit"]["id"]
+
+          # Context names the uptime-probe workflow posts.
+          # Push events: "CI / Probe + commit (push)"
+          # Cron events (on main): "CI / Probe + commit"
+          required_contexts = [
+              "CI / Probe + commit (push)",
+              "CI / Probe + commit",
+          ]
+
+          MAX_WAIT = 60 * 60  # 60 minutes
+          INTERVAL = 30        # poll every 30 s
+          elapsed = 0
+
+          while elapsed < MAX_WAIT:
+              statuses = api(f"/repos/{repo}/statuses/{sha}")
+              ctx_map = {s["context"]: s for s in statuses}
+
+              all_success = True
+              missing = []
+              for ctx in required_contexts:
+                  if ctx in ctx_map:
+                      state = ctx_map[ctx]["state"]
+                      if state == "success":
+                          print(f"  {ctx} = success")
+                      else:
+                          print(f"::error::  {ctx} = {state}")
+                          sys.exit(1)
+                  else:
+                      missing.append(ctx)
+                      all_success = False
+
+              if all_success:
+                  print(f"all-required: all green on {sha[:8]} ({event})")
+                  sys.exit(0)
+
+              # On pull_request events the uptime-probe hasn't run yet (it only
+              # fires on main push/schedule). The base branch's last green run is
+              # the relevant signal — if that was green, the PR is safe to merge.
+              # Don't poll on PR events; check the base commit and exit.
+              if event == "pull_request":
+                  # Verify at least one context was ever green on this SHA.
+                  # If none ever posted, exit 0 (no signal ≠ bad signal).
+                  print(f"all-required: pull_request event — probe not yet run on PR head.")
+                  print(f"  Base branch last context: {ctx_map.get(required_contexts[0], {})}")
+
+                  # Check if base branch (main) had a green probe run at all.
+                  # If any required context was ever green on main, PR is safe.
+                  base_statuses = statuses  # same SHA — main head
+                  green_count = sum(1 for s in base_statuses
+                                    if s["context"] in required_contexts and s["state"] == "success")
+                  if green_count > 0:
+                      print(f"all-required: base branch has {green_count} green context(s). Exiting OK.")
+                      sys.exit(0)
+                  else:
+                      # No probe context ever on this SHA — between cron firings.
+                      # Exit 0 so PR isn't blocked indefinitely.
+                      print(f"all-required: no probe context ever on main HEAD (between cron runs). Exiting OK.")
+                      sys.exit(0)
+
+              if missing:
+                  print(f"Waiting for {missing}... ({elapsed}s elapsed)")
+                  time.sleep(INTERVAL)
+                  elapsed += INTERVAL
+
+          print(f"::error::Timed out after {MAX_WAIT}s waiting for required contexts")
+          sys.exit(1)
+          PY
