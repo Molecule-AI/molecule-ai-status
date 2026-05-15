@@ -65,6 +65,21 @@ class ApiError(RuntimeError):
     pass
 
 
+class PreReceiveBlocked(ApiError):
+    """Raised when the pre-receive hook blocks a merge (HTTP 405).
+
+    Distinguishes "retryable transient failure" (network, auth, rate-limit)
+    from "permanent block that requires human UI intervention".
+    """
+
+    def __init__(self, path: str, status: int, body: str, pr_number: int):
+        self.status = status
+        self.body = body
+        self.pr_number = pr_number
+        super().__init__(f"{path} -> HTTP {status}: {body[:200]}")
+
+
+
 @dataclasses.dataclass(frozen=True)
 class MergeDecision:
     ready: bool
@@ -338,7 +353,20 @@ def merge_pull(pr_number: int, *, dry_run: bool) -> None:
     print(f"::notice::merging PR #{pr_number}")
     if dry_run:
         return
-    api("POST", f"/repos/{OWNER}/{NAME}/pulls/{pr_number}/merge", body=payload, expect_json=False)
+    path = f"/repos/{OWNER}/{NAME}/pulls/{pr_number}/merge"
+    try:
+        api("POST", path, body=payload, expect_json=False)
+    except ApiError as exc:
+        # Gitea pre-receive hook returns HTTP 405 with body like
+        # '{"message":"User not allowed to merge PR"}'. The hook blocks
+        # all API-originated merges regardless of token permissions.
+        # Detect: 405 + "not allowed" or "pre-receive" in the error body.
+        msg: str = str(exc)
+        body_snippet = msg.split("HTTP 405:")[1].strip() if "HTTP 405:" in msg else ""
+        if "405" in msg or "not allowed" in body_snippet.lower() or "pre-receive" in body_snippet.lower():
+            raise PreReceiveBlocked(path, 405, body_snippet, pr_number) from exc
+        # Other API errors (auth, rate-limit, server error) are retryable.
+        raise
 
 
 def process_once(*, dry_run: bool = False) -> int:
@@ -407,7 +435,20 @@ def process_once(*, dry_run: bool = False) -> int:
                 "deferring to next tick"
             )
             return 0
-        merge_pull(pr_number, dry_run=dry_run)
+        try:
+            merge_pull(pr_number, dry_run=dry_run)
+        except PreReceiveBlocked as exc:
+            msg = (
+                "merge-queue: **blocked by pre-receive hook** — "
+                "the Gitea server-side hook is preventing API merges for this PR. "
+                "Please merge via the UI at the link above, or ask a repo admin "
+                "to temporarily disable the hook if an emergency merge is needed."
+            )
+            post_comment(exc.pr_number, msg, dry_run=dry_run)
+            sys.stderr.write(
+                f"::error::queue: PR #{exc.pr_number} blocked by pre-receive hook "
+                f"(HTTP {exc.status}); posted comment and skipping.\n"
+            )
         return 0
     return 0
 
@@ -425,6 +466,26 @@ def main() -> int:
         # tick can retry. Returning non-zero would permanently fail the
         # workflow run, blocking future ticks.
         sys.stderr.write(f"::error::queue API error: {exc}\n")
+        return 0
+    except PreReceiveBlocked as exc:
+        # Pre-receive hook is blocking API merges. Post a comment so humans
+        # know the PR is in the queue but blocked, then skip it. We do NOT
+        # re-raise — exit 0 keeps the workflow green so the next tick can
+        # check again in case an admin clears the hook.
+        msg = (
+            "merge-queue: **blocked by pre-receive hook** — "
+            "the Gitea server-side hook is preventing API merges for this PR. "
+            "Please merge via the UI at the link above, or ask a repo admin "
+            "to temporarily disable the hook if an emergency merge is needed."
+        )
+        try:
+            post_comment(exc.pr_number, msg, dry_run=args.dry_run)
+        except Exception:
+            pass  # Don't fail the tick if commenting also fails.
+        sys.stderr.write(
+            f"::error::queue: PR #{exc.pr_number} blocked by pre-receive hook "
+            f"(HTTP {exc.status}); posted comment and skipping.\n"
+        )
         return 0
     except urllib.error.URLError as exc:
         sys.stderr.write(f"::error::queue network error: {exc}\n")
