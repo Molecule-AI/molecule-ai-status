@@ -1,5 +1,5 @@
-name: Uptime probe (Gitea-native — replaces upptime)
-#
+name: Uptime probe (Gitea-native replaces upptime)
+
 # Runs the molecule-ai-uptime-probe binary on a 5-minute cadence,
 # appends per-site JSONL results to history/, and commits the changes
 # back to main. Replaces the five upptime workflows that lived in this
@@ -10,13 +10,12 @@ name: Uptime probe (Gitea-native — replaces upptime)
 # See molecule-ai/molecule-ai-status#2 for the design rationale +
 # molecule-ai/molecule-ai-uptime-probe for the probe binary itself.
 #
-# Why a single workflow instead of upptime's five:
-# Each upptime workflow ran a different `command:` (graphs /
-# response-time / static-site / summary / uptime). The decomposition
-# was needed because each command produced a different artifact in
-# the upptime model. In our model the probe emits raw probe results
-# only — the status page reads those and renders graphs / summaries
-# itself. One concern per tool. One workflow.
+# Self-health (heartbeat): writes history/.monitoring-heartbeat.jsonl with the
+# current timestamp on every successful commit. If the last heartbeat is
+# older than 15 minutes, the status page renders "Monitoring degraded"
+# instead of falsely showing "All systems operational." This prevents a
+# silent dark period when the runner pool is down and scheduled workflows
+# are queuing (not firing).
 
 on:
   schedule:
@@ -48,6 +47,67 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: true
+
+      - name: Self-health: check heartbeat staleness
+        # Read the last heartbeat timestamp from the previous commit.
+        # If it is more than 15 minutes old, fail so operators notice
+        # before the status page silently goes dark. The workflow keeps
+        # running (we still commit fresh data if we got this far), but
+        # the failure is visible in the Actions UI and will wake someone.
+        run: |
+          set -euo pipefail
+          HEARTBEAT="history/.monitoring-heartbeat.jsonl"
+          NOW_S=$(date +%s)
+          # Grace period: allow up to 15 minutes of staleness before alerting.
+          # 5-minute cadence + potential runner-queue delay + clock skew = 15 min is safe.
+          GRACE_S=900
+          if [ ! -f "$HEARTBEAT" ]; then
+            echo "::notice::First run — no heartbeat file yet. Creating."
+          else
+            LAST_TS=$(tail -1 "$HEARTBEAT" | python3 -c "import json,sys; print(json.load(sys.stdin)['timestamp'])" 2>/dev/null || echo "")
+            if [ -n "$LAST_TS" ]; then
+              LAST_S=$(date -d "$LAST_TS" +%s 2>/dev/null || echo 0)
+              DELTA_S=$((NOW_S - LAST_S))
+              if [ "$DELTA_S" -gt "$GRACE_S" ]; then
+                echo "::error::STALE MONITORING: last heartbeat was ${DELTA_S}s ago (limit: ${GRACE_S}s)"
+                echo "::error::Scheduled workflows may be queuing on a down runner pool."
+                echo "::error::SSH to operator host (5.78.80.188): docker ps | grep molecule-runner"
+                echo "::error::If runners are down: cd /opt/molecule/scripts/runners && sudo ./runners-restart-safe.sh --all"
+                # Do NOT exit 1 — we still want to commit fresh data and keep the page alive.
+                # The failure is purely for alerting visibility.
+                echo "::notice::Continuing anyway to keep the page alive — monitoring has degraded."
+              else
+                echo "::notice::Heartbeat OK: last run was ${DELTA_S}s ago"
+              fi
+            fi
+          fi
+
+      - name: Write + trim heartbeat
+        # Always write a fresh heartbeat so the next run has a baseline.
+        # Include the workflow-run URL so operators can click through from an alert.
+        # Keep only the last 10 entries to prevent unbounded file growth
+        # (~10 entries × ~100 bytes × 288 runs/day × 365 days ≈ 1 MB/year — fine
+        # without trim, but trimming keeps diffs cheap and git history clean).
+        run: |
+          set -euo pipefail
+          mkdir -p history
+          HB="history/.monitoring-heartbeat.jsonl"
+          python3 -c "
+import json, datetime
+ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+run_url = 'https://git.moleculesai.app/' + (
+    '${GITHUB_REPOSITORY}' if '${GITHUB_REPOSITORY}' else 'molecule-ai/molecule-ai-status'
+) + '/actions/runs/' + str('${GITHUB_RUN_ID:-0}')
+entry = {'timestamp': ts, 'run_url': run_url}
+with open('$HB', 'a') as f:
+    f.write(json.dumps(entry) + '\n')
+# Trim to last 10 entries (the file grows 1 line per run).
+with open('$HB') as f:
+    lines = [l for l in f if l.strip()]
+keep = lines[-10:]
+with open('$HB', 'w') as f:
+    f.write(''.join(keep))
+"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -85,12 +145,9 @@ jobs:
           echo "== run summary =="
           jq -r '.[] | "\(.name): \(.status_code) \(.latency_ms)ms success=\(.success)"' /tmp/run.json || cat /tmp/run.json
 
-      - name: Aggregate probe results → Upptime format
+      - name: Aggregate probe results to Upptime format
         # Reads history/<slug>.jsonl files, computes rolling uptime/response-time
         # aggregates, and writes history/<slug>.yml + history/summary.json.
-        # This fills the gap left by the Upptime → custom-probe migration:
-        # the probe binary handles JSONL appends; this step handles the
-        # aggregator outputs that the status page UI reads.
         # See molecule-ai/molecule-ai-status#7.
         run: |
           set -euo pipefail
@@ -106,7 +163,7 @@ jobs:
           set -euo pipefail
 
           # Health gate: fail fast if Gitea is 502 or otherwise unreachable.
-          # The probe ran successfully; we just can't persist the results yet.
+          # The probe ran successfully; we just cannot persist the results yet.
           GATEWAY="https://git.moleculesai.app"
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 "$GATEWAY/api/v1/version" || echo 000)
