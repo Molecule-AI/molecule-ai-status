@@ -79,6 +79,21 @@ class PreReceiveBlocked(ApiError):
         super().__init__(f"{path} -> HTTP {status}: {body[:200]}")
 
 
+class MergeConflict(ApiError):
+    """Raised when the /pulls/{n}/update endpoint returns HTTP 409 Conflict.
+
+    The branch cannot be updated with the base branch due to merge conflicts.
+    The queue must NOT retry indefinitely — the PR needs human intervention.
+    """
+
+    def __init__(self, path: str, status: int, body: str, pr_number: int, attempted_style: str):
+        self.status = status
+        self.body = body
+        self.pr_number = pr_number
+        self.attempted_style = attempted_style
+        super().__init__(f"{path} -> HTTP {status}: {body[:200]}")
+
+
 
 @dataclasses.dataclass(frozen=True)
 class MergeDecision:
@@ -329,16 +344,36 @@ def post_comment(pr_number: int, body: str, *, dry_run: bool) -> None:
     api("POST", f"/repos/{OWNER}/{NAME}/issues/{pr_number}/comments", body={"body": body})
 
 
-def update_pull(pr_number: int, *, dry_run: bool) -> None:
-    print(f"::notice::updating PR #{pr_number} with base branch via style={UPDATE_STYLE}")
+def remove_label(pr_number: int, label: str, *, dry_run: bool) -> None:
+    """Remove a label from a PR."""
+    print(f"::notice::removing label '{label}' from PR #{pr_number}")
     if dry_run:
         return
     api(
-        "POST",
-        f"/repos/{OWNER}/{NAME}/pulls/{pr_number}/update",
-        query={"style": UPDATE_STYLE},
-        expect_json=False,
+        "DELETE",
+        f"/repos/{OWNER}/{NAME}/issues/{pr_number}/labels/{urllib.parse.quote(label)}",
     )
+
+
+def update_pull(pr_number: int, *, dry_run: bool, style: str | None = None) -> None:
+    """Update PR base branch. Raises MergeConflict on HTTP 409."""
+    effective_style = style or UPDATE_STYLE
+    print(f"::notice::updating PR #{pr_number} with base branch via style={effective_style}")
+    if dry_run:
+        return
+    path = f"/repos/{OWNER}/{NAME}/pulls/{pr_number}/update"
+    try:
+        api(
+            "POST",
+            path,
+            query={"style": effective_style},
+            expect_json=False,
+        )
+    except ApiError as exc:
+        msg: str = str(exc)
+        if "409" in msg or "conflict" in msg.lower():
+            raise MergeConflict(path, 409, msg, pr_number, effective_style) from exc
+        raise
 
 
 def merge_pull(pr_number: int, *, dry_run: bool) -> None:
@@ -417,7 +452,52 @@ def process_once(*, dry_run: bool = False) -> int:
 
     print(f"::notice::PR #{pr_number} decision={decision.action}: {decision.reason}")
     if decision.action == "update":
-        update_pull(pr_number, dry_run=dry_run)
+        try:
+            update_pull(pr_number, dry_run=dry_run)
+        except MergeConflict as exc:
+            if exc.attempted_style == "merge" and UPDATE_STYLE == "merge":
+                # Merge-style conflict: try rebase as a one-shot fallback before
+                # giving up. Rebase rewrites the branch on top of main and
+                # resolves conflicts differently — often succeeds where merge fails.
+                print(
+                    f"::notice::merge-style update for PR #{pr_number} conflicted; "
+                    f"retrying with rebase"
+                )
+                try:
+                    update_pull(pr_number, dry_run=dry_run, style="rebase")
+                    post_comment(
+                        pr_number,
+                        (
+                            f"merge-queue: rebase-sync succeeded — the branch has been "
+                            f"rebased onto `{WATCH_BRANCH}` at `{main_sha[:12]}`. "
+                            "Waiting for CI on the refreshed head."
+                        ),
+                        dry_run=dry_run,
+                    )
+                    # Rebase succeeded: remove the queue label so the queue moves
+                    # on to other PRs. The author re-adds the label once CI passes.
+                    remove_label(pr_number, QUEUE_LABEL, dry_run=dry_run)
+                    print(f"::notice::PR #{pr_number} removed from queue; re-add label after CI passes")
+                    return 0
+                except MergeConflict:
+                    pass  # Fall through to conflict-handling below.
+            # Rebase also conflicted, or UPDATE_STYLE=rebase already.
+            # The PR has real merge conflicts that need human resolution.
+            msg = (
+                f"merge-queue: **merge conflict** — "
+                f"the branch cannot be automatically synced with `{WATCH_BRANCH}` "
+                f"(conflicts in both merge and rebase styles). "
+                "Please resolve the conflicts locally and push the fix, or rebase "
+                "the branch onto the latest main. Once conflicts are resolved, "
+                "re-add the `merge-queue` label to re-enter the queue."
+            )
+            post_comment(pr_number, msg, dry_run=dry_run)
+            remove_label(pr_number, QUEUE_LABEL, dry_run=dry_run)
+            sys.stderr.write(
+                f"::error::queue: PR #{pr_number} has merge conflicts with "
+                f"{WATCH_BRANCH}; removed queue label and posted comment.\n"
+            )
+            return 0
         post_comment(
             pr_number,
             (
@@ -426,6 +506,11 @@ def process_once(*, dry_run: bool = False) -> int:
             ),
             dry_run=dry_run,
         )
+        # Remove the queue label so the queue moves on to other PRs.
+        # The author re-adds the label once CI passes, which confirms the
+        # sync is valid and triggers a fresh CI run on the updated head.
+        remove_label(pr_number, QUEUE_LABEL, dry_run=dry_run)
+        print(f"::notice::PR #{pr_number} removed from queue; re-add label after CI passes")
         return 0
     if decision.ready:
         latest_main_sha = get_branch_head(WATCH_BRANCH)
@@ -485,6 +570,26 @@ def main() -> int:
         sys.stderr.write(
             f"::error::queue: PR #{exc.pr_number} blocked by pre-receive hook "
             f"(HTTP {exc.status}); posted comment and skipping.\n"
+        )
+        return 0
+    except MergeConflict as exc:
+        # MergeConflict is handled inline in process_once (update step).
+        # This catch-all handles any edge case where it escapes.
+        # Post comment + remove label, then skip — same as the inline handler.
+        msg = (
+            f"merge-queue: **merge conflict** — "
+            f"the branch cannot be automatically synced with `{WATCH_BRANCH}`. "
+            "Please resolve the conflicts locally and push, then re-add "
+            "`merge-queue` to re-enter the queue."
+        )
+        try:
+            post_comment(exc.pr_number, msg, dry_run=args.dry_run)
+            remove_label(exc.pr_number, QUEUE_LABEL, dry_run=args.dry_run)
+        except Exception:
+            pass
+        sys.stderr.write(
+            f"::error::queue: PR #{exc.pr_number} merge conflict "
+            f"(style={exc.attempted_style}); removed queue label and skipping.\n"
         )
         return 0
     except urllib.error.URLError as exc:
