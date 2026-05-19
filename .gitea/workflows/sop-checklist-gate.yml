@@ -73,6 +73,23 @@ on:
   issue_comment:
     types: [created, edited, deleted]
 
+# Serialize runs per PR to prevent the OOM-storm fan-out documented in
+# `reference_operator_host_python3_oom_storm_2026_05_18`: PR #21's
+# merge fan-fired 7 concurrent runs (one per comment event + merge
+# synthesis), each consuming ~4GB anon-RSS for `actions/checkout` +
+# `setup-python` + `pip install`, and OOM-killed 4 of 7.
+#
+# Group key = PR number (issue.number is set for both pull_request_target
+# and issue_comment events on a PR).
+#
+# NO `cancel-in-progress` — defaults to false. Per
+# `feedback_janitor_supersede_must_group_by_workflow_id`, cancelling
+# in-flight required-check runs triggers `dismiss_stale_approvals` +
+# the empty-commit-rerun dance (Gitea 1.22.6 has no REST rerun). The
+# gate is read-only + idempotent — let queued ticks run sequentially.
+concurrency:
+  group: sop-checklist-gate-${{ github.event.issue.number || github.event.pull_request.number }}
+
 permissions:
   contents: read
   pull-requests: read
